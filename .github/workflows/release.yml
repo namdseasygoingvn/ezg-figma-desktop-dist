@@ -21,7 +21,7 @@ env:
   RELEASE_BODY: |
     EZG Figma Desktop: Figma manager, EZG tool panels and the EZG bridge hub.
 
-    **macOS:** download the `.dmg` for your chip (`aarch64` = Apple Silicon, `x64` = Intel) and drag the app to Applications.
+    **macOS (Apple Silicon only):** download the `aarch64` `.dmg` and drag the app to Applications.
     First open: run `xattr -dr com.apple.quarantine "/Applications/EZG Figma Desktop.app"`, or allow it once in **System Settings → Privacy & Security → Open Anyway**.
 
     **Windows (x64):** download the `-setup.exe` and run it. SmartScreen warns once (unsigned): **More info → Run anyway**.
@@ -109,8 +109,6 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
