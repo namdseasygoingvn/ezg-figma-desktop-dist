@@ -158,6 +158,29 @@ jobs:
 
       - run: npm ci
 
+      # Tauri resolves only trusted identities, so the self-signed certificate is
+      # imported here and trusted for code signing instead of passed as APPLE_CERTIFICATE.
+      - name: Import and trust the signing certificate
+        if: runner.os == 'macOS'
+        env:
+          P12: ${{ secrets.APPLE_CERTIFICATE }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KC="$RUNNER_TEMP/ezg-sign.keychain-db"
+          KP=$(openssl rand -hex 16)
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          security import "$RUNNER_TEMP/sign.p12" -k "$KC" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/sign.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KP" "$KC" > /dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          security find-certificate -c "$MAC_SIGNING_IDENTITY" -p "$KC" > "$RUNNER_TEMP/sign.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/sign.pem"
+          security find-identity -v -p codesigning | grep -F "\"$MAC_SIGNING_IDENTITY\""
+
       # Builds, signs the updater artifacts, uploads them to this repo's draft and
       # merges the platform into latest.json.
       - uses: tauri-apps/tauri-action@v0
@@ -165,8 +188,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && env.MAC_SIGNING_IDENTITY || '' }}
         with:
           owner: namdseasygoingvn
