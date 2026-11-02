@@ -17,6 +17,9 @@ permissions:
 
 env:
   SOURCE_REPO: namdseasygoingvn/ezg-figma-desktop
+  # Self-signed, from secret APPLE_CERTIFICATE: the designated requirement names this
+  # certificate instead of the build's cdhash, so macOS keeps granted permissions across updates.
+  MAC_SIGNING_IDENTITY: EZG Figma Desktop Self-Signed
   RUST_TOOLCHAIN: "1.98.0"
   RELEASE_BODY: |
     EZG Figma Desktop: Figma manager, EZG tool panels and the EZG bridge hub.
@@ -131,8 +134,9 @@ jobs:
             const fs = require("fs"), f = "src-tauri/tauri.conf.json"
             const c = JSON.parse(fs.readFileSync(f, "utf8"))
             c.version = process.argv[1]
+            if (process.argv[2] === "macOS") c.bundle.macOS.signingIdentity = process.argv[3]
             fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n")
-          ' "$V"
+          ' "$V" "$RUNNER_OS" "$MAC_SIGNING_IDENTITY"
           npm pkg set version="$V"
 
       - uses: mozilla-actions/sccache-action@v0.0.11
@@ -161,6 +165,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && env.MAC_SIGNING_IDENTITY || '' }}
         with:
           owner: namdseasygoingvn
           repo: ezg-figma-desktop-dist
@@ -169,14 +176,17 @@ jobs:
           releaseBody: ${{ env.RELEASE_BODY }}
           args: --target ${{ matrix.target }}
 
-      # An unsealed arm64 bundle is reported as damaged and cannot be opened;
-      # the ad-hoc identity in tauri.conf.json prevents that.
-      - name: Check the macOS bundle is sealed
+      # An unsealed arm64 bundle is reported as damaged and cannot be opened. An ad-hoc
+      # signature would make macOS ask for every permission again after each update.
+      - name: Check the macOS bundle is sealed by the self-signed certificate
         if: runner.os == 'macOS'
         run: |
           APP=$(node -p "require('./src-tauri/tauri.conf.json').productName")
-          codesign --verify --strict --verbose=2 \
-            "src-tauri/target/${{ matrix.target }}/release/bundle/macos/$APP.app"
+          BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle/macos/$APP.app"
+          codesign --verify --strict --verbose=2 "$BUNDLE"
+          REQ=$(codesign -dr - "$BUNDLE" 2>&1)
+          echo "$REQ"
+          echo "$REQ" | grep -q 'certificate root = '
 
   # A release missing a platform stays a draft, where releases/latest cannot serve
   # its half-populated latest.json to the updater.
